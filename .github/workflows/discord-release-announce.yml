@@ -39,6 +39,7 @@ jobs:
           fi
 
       - name: Notify Discord
+        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           VERSION_TAG: ${{ steps.tags.outputs.latest_tag }}

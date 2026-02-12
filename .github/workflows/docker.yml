@@ -32,13 +32,44 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="${{ inputs.tag_name }}"
+          INPUT_TAG="${{ inputs.tag_name }}"
+          EVENT_TAG="${{ github.event.release.tag_name }}"
 
-          if [[ -z "$TAG_NAME" || "$TAG_NAME" == "null" ]]; then
-            TAG_NAME="${{ github.event.release.tag_name }}"
+          resolve_existing_release_tag() {
+            local candidate="$1"
+            if [[ -z "$candidate" || "$candidate" == "null" ]]; then
+              return 1
+            fi
+
+            if gh release view "$candidate" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              echo "$candidate"
+              return 0
+            fi
+
+            if [[ "$candidate" =~ ^v ]]; then
+              local no_v="${candidate#v}"
+              if gh release view "$no_v" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+                echo "$no_v"
+                return 0
+              fi
+            else
+              local with_v="v${candidate}"
+              if gh release view "$with_v" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+                echo "$with_v"
+                return 0
+              fi
+            fi
+
+            return 1
+          }
+
+          TAG_NAME=""
+
+          TAG_NAME="$(resolve_existing_release_tag "$INPUT_TAG" || true)"
+          if [[ -z "$TAG_NAME" ]]; then
+            TAG_NAME="$(resolve_existing_release_tag "$EVENT_TAG" || true)"
           fi
-
-          if [[ -z "$TAG_NAME" || "$TAG_NAME" == "null" ]]; then
+          if [[ -z "$TAG_NAME" ]]; then
             TAG_NAME="$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName')"
           fi
 
@@ -47,8 +78,8 @@ jobs:
             exit 1
           fi
 
-          echo "Building for version: $TAG_NAME"
-          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Building Docker image from release: $TAG_NAME"
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Download Linux Release Assets
         env:
