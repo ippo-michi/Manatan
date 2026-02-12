@@ -246,10 +246,6 @@ jobs:
           CARGO_PROFILE_RELEASE_STRIP: symbols
           MANATAN_GOOGLE_OAUTH_BROKER_TOKEN: ${{ secrets.MANATAN_GOOGLE_OAUTH_BROKER_TOKEN }}
         run: |
-          if [ -z "$MANATAN_GOOGLE_OAUTH_BROKER_TOKEN" ]; then
-            echo "Missing MANATAN_GOOGLE_OAUTH_BROKER_TOKEN secret" >&2
-            exit 1
-          fi
           cd bin/manatan
           cargo build --release --target ${{ matrix.target }} --features embed-jre
 
@@ -346,6 +342,10 @@ jobs:
     needs: [prepare_version, build_webui]
     name: Build Android APKs
     runs-on: ubuntu-latest
+    env:
+      ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+      ANDROID_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -413,10 +413,6 @@ jobs:
           CARGO_PROFILE_RELEASE_STRIP: symbols
           MANATAN_GOOGLE_OAUTH_BROKER_TOKEN: ${{ secrets.MANATAN_GOOGLE_OAUTH_BROKER_TOKEN }}
         run: |
-          if [ -z "$MANATAN_GOOGLE_OAUTH_BROKER_TOKEN" ]; then
-            echo "Missing MANATAN_GOOGLE_OAUTH_BROKER_TOKEN secret" >&2
-            exit 1
-          fi
           NDK_ROOT=${ANDROID_NDK_HOME}
           if [ -z "$NDK_ROOT" ]; then NDK_ROOT=$(ls -d /usr/local/lib/android/sdk/ndk/* | sort -V | tail -n1); fi
           TOOLCHAIN_BIN="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -442,10 +438,11 @@ jobs:
           cp $(find ../../target -name "*.apk" | grep "release/apk" | head -n 1) ../../signing_stage/manatan-native-webview-unsigned.apk
 
       - name: Sign APKs
+        if: ${{ env.ANDROID_SIGNING_KEY != '' && env.ANDROID_KEY_STORE_PASSWORD != '' && env.ANDROID_KEY_PASSWORD != '' }}
         env:
-          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_SIGNING_KEY }}
-          KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SIGNING_KEY_BASE64: ${{ env.ANDROID_SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ env.ANDROID_KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ env.ANDROID_KEY_PASSWORD }}
           ALIAS: mangatan
         run: |
           echo "$SIGNING_KEY_BASE64" | base64 -d --ignore-garbage > release.keystore
@@ -458,6 +455,13 @@ jobs:
             "$BUILD_TOOLS_PATH/apksigner" sign --ks release.keystore --ks-pass pass:"$KEY_STORE_PASSWORD" --ks-key-alias "$ALIAS" --key-pass pass:"$KEY_PASSWORD" --out "signed_apks/${BASENAME}.apk" "${BASENAME}-aligned.apk"
           done
 
+      - name: Prepare Unsigned APK Artifacts
+        if: ${{ env.ANDROID_SIGNING_KEY == '' || env.ANDROID_KEY_STORE_PASSWORD == '' || env.ANDROID_KEY_PASSWORD == '' }}
+        run: |
+          mkdir -p signed_apks
+          cp signing_stage/manatan-browser-unsigned.apk signed_apks/manatan-browser.apk
+          cp signing_stage/manatan-native-webview-unsigned.apk signed_apks/manatan-native-webview.apk
+
       - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -469,6 +473,8 @@ jobs:
   release:
     needs: [build_manatan, build_android, prepare_version]
     runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -534,8 +540,8 @@ jobs:
           files: final_release/*
 
       - name: Notify Discord
+        if: ${{ env.DISCORD_WEBHOOK != '' }}
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           VERSION_TAG: ${{ needs.prepare_version.outputs.version_tag }}
         run: python .github/scripts/discord_announce.py
 
